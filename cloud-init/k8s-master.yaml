@@ -1,0 +1,78 @@
+#cloud-config
+
+users:
+  - default
+  - name: xiaocj
+    gecos: Xiao Chuanjiao
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users,admin,sudo
+    ssh-authorized-keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCtDR5xBFXZ3oNQlRHeO04v76sNAdoq/qX1+RydUYuzaNkRvRVXycgJs1VsTMB+k+yin1w6lE+OhHX95ajKhIqdQMQQnkp3jeFrTQVA1UabsWMj6eetkL4h49peN/Vw/d4G8WE11OUcHZzr0d/4xEIdvpIVYM/PLukiWMIHp98kMkZTtzeCnB7V4d65eG7lnmaGL7s8ZAH7fP8SihSYNk/3BVZ0I5Qzy52RR/3ueeojisvb35uCFKIkFPTF+JquuTT8shP2jSRNbQNDCsm8JmOZPrXOJQ2kX/wZ00FCqWBOb1n16AobWiDEwGVNk275jFSKn0ZRHIdAUIUMjIBVSDhDRh9QJfsoHbUjuOPz6Xar4IeowPDZq70dVrh5gUmmLcC7rj7F28OFbIxUeaHRmYsdhiVC7beerIkS8wfZAEEioliYakFVlHq+B2y7pnZKL8BmOMy3LnS0lVG9a8eUKzzrxf2VQPjbaUjLTZSfZFpfrzQt7iHF5uvqNDshY6NgRzpj2hmnY5NoiA8X9vMSSJ2Qxu4GOxQko/2NxG2QC5gsl5uwoF//g97yrYBlmeOqFlaIRD3Rnhzyb2ZZwU/uiTlQ0mhWjVu55qOhFQFrQcvI+TDRvF9LNa6EdlxXcN7A826OIpPxdF6IFe49aX9Zxc86eREavmMCCOnfZ9DPWopLiQ== xiaocj@gmail.com
+
+package_update: true
+packages:
+  - curl
+  - gnupg2
+  - software-properties-common
+  - ca-certificates
+  - apt-transport-https
+
+write_files:
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "100m"
+        },
+        "storage-driver": "overlay2"
+      }
+  - path: /home/ubuntu/README.md
+    content: |
+      1. 检查kubectl和kubeadm是否安装成功
+      ```
+      kubectl version --client && kubeadm version
+      ```
+      2. 检查k8s是否运行正常
+      ```
+      kubectl get pods --all-namespaces
+      ```
+
+runcmd:
+  # 关闭swap
+  - sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+  - sudo swapoff -a
+  # 添加源地址
+  - curl https://mirrors.aliyun.com/kubernetes/apt/doc/apt-key.gpg | sudo apt-key add - 
+  - echo "deb https://mirrors.aliyun.com/kubernetes/apt/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list 
+  # 更新源并安装最新版 kubenetes
+  - sudo apt update
+  - sudo apt-get install -y kubelet kubeadm kubectl
+
+  # 安装docker
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+  - sudo apt update
+  - sudo apt install -y containerd.io docker-ce docker-ce-cli
+  # reload
+  - sudo systemctl daemon-reload 
+  - sudo systemctl restart docker
+  - sudo systemctl enable docker
+
+  # 初始化集群
+  - sudo kubeadm init --image-repository='registry.cn-hangzhou.aliyuncs.com/google_containers' --pod-network-cidr=192.168.0.0/16
+  - mkdir -p /home/ubuntu/.kube
+  - sudo cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+  - sudo chown ubuntu:ubuntu /home/ubuntu/.kube/config
+  - echo "source <(kubectl completion bash)" >> /etc/bash.bashrc
+  - echo "source <(kubeadm completion bash)" >> /etc/bash.bashrc
+  # 添加网络插件
+  - kubectl create -f https://projectcalico.docs.tigera.io/manifests/tigera-operator.yaml
+  - kubectl create -f https://projectcalico.docs.tigera.io/manifests/custom-resources.yaml
+
+  # Install Kubernetes Dashboard
+  - [kubectl, apply, -f, https://raw.githubusercontent.com/kubernetes/dashboard/master/aio/deploy/recommended.yaml]
+  - [kubectl, --namespace, kubernetes-dashboard, patch, svc, kubernetes-dashboard, -p, '{"spec": {"type": "NodePort"}}']
+  
